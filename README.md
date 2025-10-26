@@ -43,4 +43,6 @@ Flags:
   -h, --help    Show context-sensitive help.
 ```
 
-// TODO
+# DTM
+
+Simple dotfiles installer, allows to merge and install different dotfiles profiles.  
