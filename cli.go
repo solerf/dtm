@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/solerf/dtm/runner"
+	"github.com/solerf/dtm/dotfile"
 )
 
 type InstallCmd struct {
@@ -11,22 +11,27 @@ type InstallCmd struct {
 }
 
 func (i *InstallCmd) Run() error {
-	if err := runner.Install(i.Profiles, i.Source, i.Target); err != nil {
-		return err
-	}
-	return nil
+	return dotfile.Install(i.Source, i.Target, i.Profiles...)
 }
 
-type UninstallCmd struct{}
+type UninstallCmd struct {
+	Target string `optional:"" short:"t"  type:"path" default:"$HOME" env:"HOME" help:"Path to target directory where dotfiles are installed."`
+}
 
-func (d *UninstallCmd) Run() error {
-	if err := runner.Uninstall(); err != nil {
-		return err
-	}
-	return nil
+func (u *UninstallCmd) Run() error {
+	return dotfile.Uninstall(u.Target)
+}
+
+type ShowCmd struct {
+	Target string `optional:"" short:"t"  type:"path" default:"$HOME" env:"HOME" help:"Path to target directory where dotfiles are installed."`
+}
+
+func (s *ShowCmd) Run() error {
+	return dotfile.Show(s.Target)
 }
 
 var cmd struct {
-	Install   InstallCmd   `cmd:"" help:"Install dotfiles at $HOME."`
-	Uninstall UninstallCmd `cmd:"" help:"Uninstall dotfiles created at $HOME."`
+	Install   InstallCmd   `cmd:"" help:"Install dotfiles."`
+	Uninstall UninstallCmd `cmd:"" help:"Uninstall dotfiles previously installed."`
+	Show      ShowCmd      `cmd:"" help:"Show current dotfiles installed."`
 }

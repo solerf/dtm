@@ -1,4 +1,4 @@
-package runner
+package dotfile
 
 import (
 	"bufio"
@@ -20,15 +20,15 @@ var (
 	}
 )
 
-func notIgnoreFilter(source string) func(string) bool {
+func IgnoreFilter(source string) func(string) bool {
 	globList, _ := ignoreList(source)
 	return func(s string) bool {
 		for i := 0; i < len(globList); i++ {
 			if globList[i].Match(s) {
-				return false
+				return true
 			}
 		}
-		return true
+		return false
 	}
 }
 
@@ -36,15 +36,28 @@ func ignoreList(source string) ([]glob.Glob, error) {
 	ignores := make(map[string]struct{}, len(ignoreGlobs))
 	maps.Insert(ignores, maps.All(ignoreGlobs))
 
-	err := filepath.WalkDir(source, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(source, walkDir(ignores))
+	if err != nil {
+		return nil, fmt.Errorf("ignore: %w", err)
+	}
+
+	globs := make([]glob.Glob, 0, len(ignores))
+	for ig := range maps.Keys(ignores) {
+		globs = append(globs, glob.MustCompile(ig))
+	}
+	return globs, nil
+}
+
+func walkDir(ignores map[string]struct{}) func(string, fs.DirEntry, error) error {
+	return func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return fmt.Errorf("in walk [%v]: %w", path, err)
+			return fmt.Errorf("walk [%v]: %w", path, err)
 		}
 
 		if !d.IsDir() && strings.HasSuffix(path, ".gitignore") {
-			file, errOpen := os.OpenFile(path, os.O_RDONLY, 0)
-			if errOpen != nil {
-				return errOpen
+			file, err := os.OpenFile(path, os.O_RDONLY, 0)
+			if err != nil {
+				return fmt.Errorf("open [%v]: %w", path, err)
 			}
 			defer file.Close()
 
@@ -57,15 +70,5 @@ func ignoreList(source string) ([]glob.Glob, error) {
 			}
 		}
 		return nil
-	})
-
-	if err != nil {
-		return nil, fmt.Errorf("ignore list: %w", err)
 	}
-
-	globs := make([]glob.Glob, 0, len(ignores))
-	for ig, _ := range ignores {
-		globs = append(globs, glob.MustCompile(ig))
-	}
-	return globs, nil
 }
