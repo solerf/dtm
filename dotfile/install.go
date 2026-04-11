@@ -16,17 +16,19 @@ func Install(sourceDir, targetDir string, profileNames ...string) error {
 	}
 
 	if exists := common.MustPathExists(targetDir); !exists {
-		if errMkdir := os.MkdirAll(targetDir, common.FileMode); errMkdir != nil {
+		if errMkdir := os.MkdirAll(targetDir, common.DirMode); errMkdir != nil {
 			return fmt.Errorf("install: mkdir: %w", errMkdir)
 		}
 	}
 
-	profiles, err := profile.Transform(sourceDir, profileNames)
+	profiles := profile.Transform(sourceDir, profileNames)
+
+	ignoreFilter, err := IgnoreFilter(sourceDir)
 	if err != nil {
 		return fmt.Errorf("install: %w", err)
 	}
 
-	filePaths, err := Collect(IgnoreFilter(sourceDir), profiles...)
+	filePaths, err := Collect(ignoreFilter, profiles...)
 	if err != nil {
 		return fmt.Errorf("install: %w", err)
 	}
@@ -38,10 +40,10 @@ func Install(sourceDir, targetDir string, profileNames ...string) error {
 	for i := 0; i < len(dotfiles); i++ {
 		e := dotfiles[i]
 		if err = e.Install(); err != nil {
-			log.Printf("[ERROR] %v", fmt.Sprintf(msgTempl, e.Key, e.TargetPath, err))
+			log.Printf("[ERROR] "+msgTempl, e.Key, e.TargetPath, err)
 			continue
 		}
-		log.Println(fmt.Sprintf(msgTempl, e.Key, e.TargetPath, "OK"))
+		log.Printf(msgTempl, e.Key, e.TargetPath, "OK")
 	}
 
 	if err = newMapping(targetDir, profiles, dotfiles).write(); err != nil {
@@ -63,7 +65,9 @@ func removeStaleEntries(targetDir string) {
 		for i := 0; i < len(mapping.DotFiles); i++ {
 			dt := mapping.DotFiles[i]
 
-			// it will follow the link, if missing returns false
+			// it will follow the symlink, if missing returns false
+			// means that the linked file does not exist anymore
+			// so is safe to remove the link
 			if !common.MustPathExists(dt.TargetPath) {
 				if err = os.Remove(dt.TargetPath); err != nil {
 					log.Printf("[ERROR] trying to remove stale link [%v]: %v", dt.TargetPath, err)

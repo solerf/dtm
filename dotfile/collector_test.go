@@ -42,8 +42,9 @@ func Test_Collect_DotFiles(t *testing.T) {
 }
 
 func Test_Collect_Ignore_Entry(t *testing.T) {
+	filter, _ := IgnoreFilter("")
 	dotfiles, _ := Collect(
-		func(s string) bool { return !strings.HasSuffix(s, "_IGNORE") },
+		filter,
 		profile.New("testdata/source", "a"),
 	)
 

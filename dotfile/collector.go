@@ -24,7 +24,7 @@ func Collect(ignoreFunc func(string) bool, profiles ...profile.Info) ([]string, 
 	if err != nil {
 		return nil, fmt.Errorf("collector: %w", err)
 	}
-	return collectedPaths, nil
+	return slices.Clip(collectedPaths), nil
 }
 
 func collectDistinct(ignoreFunc func(string) bool, paths ...string) ([]string, error) {
@@ -34,7 +34,11 @@ func collectDistinct(ignoreFunc func(string) bool, paths ...string) ([]string, e
 	}
 
 	for len(duplicatesQueue) > 0 { // pop
-		moreUniques, moreDuplicates, _ := collectPaths(ignoreFunc, duplicatesQueue...)
+		moreUniques, moreDuplicates, err := collectPaths(ignoreFunc, duplicatesQueue...)
+		if err != nil {
+			return nil, err
+		}
+
 		uniques = append(uniques, moreUniques...)
 		duplicatesQueue = moreDuplicates // push
 	}
@@ -42,8 +46,7 @@ func collectDistinct(ignoreFunc func(string) bool, paths ...string) ([]string, e
 }
 
 func collectPaths(ignoreFunc func(string) bool, paths ...string) ([]string, []string, error) {
-	uniques := make([]string, 0, len(paths))
-	duplicates := make([]string, 0, len(paths))
+	entries := make(map[string][]string, len(paths))
 
 	for _, p := range paths {
 		collected, err := collectDirEntries(ignoreFunc, p)
@@ -55,13 +58,6 @@ func collectPaths(ignoreFunc func(string) bool, paths ...string) ([]string, []st
 			fullPath := path.Join(p, collected[i])
 			key := profile.RemoveProfile(fullPath)
 
-			indexFunc := slices.IndexFunc(uniques, func(u string) bool { return strings.HasSuffix(u, key) })
-			if indexFunc != -1 {
-				duplicates = append(duplicates, fullPath, uniques[indexFunc])
-				uniques = append(uniques[:indexFunc], uniques[indexFunc+1:]...)
-				continue
-			}
-
 			if isExplodedDir(fullPath) {
 				err = filepath.WalkDir(fullPath, func(childPath string, childEntry fs.DirEntry, err error) error {
 					if err != nil {
@@ -69,7 +65,7 @@ func collectPaths(ignoreFunc func(string) bool, paths ...string) ([]string, []st
 					}
 
 					if !childEntry.IsDir() && !ignoreFunc(childEntry.Name()) {
-						uniques = append(uniques, childPath)
+						entries[key] = append(entries[key], childPath)
 					}
 					return nil
 				})
@@ -79,12 +75,22 @@ func collectPaths(ignoreFunc func(string) bool, paths ...string) ([]string, []st
 				}
 				continue
 			}
-
-			uniques = append(uniques, fullPath)
+			entries[key] = append(entries[key], fullPath)
 		}
 	}
 
-	return uniques, duplicates, nil
+	uniques := make([]string, 0, len(paths))
+	duplicates := make([]string, 0, len(paths))
+
+	for _, v := range entries {
+		if len(v) == 1 {
+			uniques = append(uniques, v...)
+			continue
+		}
+		duplicates = append(duplicates, v...)
+	}
+
+	return slices.Clip(uniques), slices.Clip(duplicates), nil
 }
 
 func isExplodedDir(p string) bool {

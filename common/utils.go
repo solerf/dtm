@@ -7,7 +7,8 @@ import (
 )
 
 const (
-	FileMode      = os.FileMode(0766)
+	FileMode      = os.FileMode(0644)
+	DirMode       = os.FileMode(0755)
 	PathSeparator = string(filepath.Separator)
 )
 

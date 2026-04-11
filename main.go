@@ -5,7 +5,6 @@ import (
 )
 
 func main() {
-	kong.UsageOnError()
-	kCtx := kong.Parse(&cmd)
+	kCtx := kong.Parse(&cmd, kong.UsageOnError())
 	kCtx.FatalIfErrorf(kCtx.Run())
 }

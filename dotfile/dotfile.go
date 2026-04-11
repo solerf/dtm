@@ -22,7 +22,7 @@ type entry struct {
 func (e *entry) Install() error {
 	targetDir := path.Dir(e.TargetPath)
 	if !common.MustPathExists(targetDir) {
-		if err := os.MkdirAll(targetDir, common.FileMode); err != nil {
+		if err := os.MkdirAll(targetDir, common.DirMode); err != nil {
 			return fmt.Errorf("mkdir all [%v]: %w", targetDir, err)
 		}
 	}
@@ -62,7 +62,7 @@ func (e *entry) Uninstall() error {
 
 func newEntry(targetDir string, sourceFullPath string) entry {
 	key := profile.RemoveProfile(sourceFullPath)
-	return entry{Key: key, SourcePath: sourceFullPath, TargetPath: fmt.Sprintf("%s/%s", targetDir, key)}
+	return entry{Key: key, SourcePath: sourceFullPath, TargetPath: path.Join(targetDir, key)}
 }
 
 func batch(targetDir string, sourceFullPath ...string) []entry {

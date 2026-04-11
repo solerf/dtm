@@ -1,7 +1,6 @@
 package profile
 
 import (
-	"fmt"
 	"log"
 	"path"
 	"slices"
@@ -33,23 +32,23 @@ type Info struct {
 func New(source string, name string) Info {
 	return Info{
 		Name: name,
-		Path: fmt.Sprintf("%s/%s%s", source, prefix, name),
+		Path: path.Join(source, prefix+name),
 	}
 }
 
-func Transform(source string, names []string) (Profiles, error) {
+func Transform(source string, names []string) Profiles {
 	profiles := make([]Info, len(names)+1)
 	profiles[0] = New(source, shared)
 
 	for i := 0; i < len(names); i++ {
 		p := New(source, names[i])
 		if exists := common.MustPathExists(p.Path); !exists {
-			log.Printf("[WARN] profile [%v] not found at [%v]", p.Name, p.Path)
+			log.Printf("[WARN] profile [%v] not found at [%v], ignored", p.Name, p.Path)
 			continue
 		}
-		profiles[i+1] = p
+		profiles = append(profiles, p)
 	}
-	return profiles, nil
+	return profiles
 }
 
 func RemoveProfile(p string) string {

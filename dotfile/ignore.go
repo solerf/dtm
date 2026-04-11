@@ -20,8 +20,12 @@ var (
 	}
 )
 
-func IgnoreFilter(source string) func(string) bool {
-	globList, _ := ignoreList(source)
+func IgnoreFilter(source string) (func(string) bool, error) {
+	globList, err := ignoreList(source)
+	if err != nil {
+		return nil, err
+	}
+
 	return func(s string) bool {
 		for i := 0; i < len(globList); i++ {
 			if globList[i].Match(s) {
@@ -29,21 +33,23 @@ func IgnoreFilter(source string) func(string) bool {
 			}
 		}
 		return false
-	}
+	}, nil
 }
 
 func ignoreList(source string) ([]glob.Glob, error) {
 	ignores := make(map[string]struct{}, len(ignoreGlobs))
 	maps.Insert(ignores, maps.All(ignoreGlobs))
 
-	err := filepath.WalkDir(source, walkDir(ignores))
-	if err != nil {
-		return nil, fmt.Errorf("ignore: %w", err)
+	if len(source) > 0 {
+		err := filepath.WalkDir(source, walkDir(ignores))
+		if err != nil {
+			return nil, fmt.Errorf("ignore: %w", err)
+		}
 	}
 
 	globs := make([]glob.Glob, 0, len(ignores))
-	for ig := range maps.Keys(ignores) {
-		globs = append(globs, glob.MustCompile(ig))
+	for k, _ := range ignores {
+		globs = append(globs, glob.MustCompile(k))
 	}
 	return globs, nil
 }

@@ -44,10 +44,10 @@ func Uninstall(targetDir string) error {
 	for d := range maps.Keys(remainingDirs) {
 		if common.MustPathExists(d) {
 			if err = os.RemoveAll(d); err != nil {
-				log.Printf("[ERROR] %v", fmt.Sprintf(msgTempl, d, err))
+				log.Printf("[ERROR] "+msgTempl, d, err)
 				continue
 			}
-			log.Print(fmt.Sprintf(msgTempl, d, "OK"))
+			log.Printf(msgTempl, d, "OK")
 		}
 	}
 
