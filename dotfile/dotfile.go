@@ -1,74 +1,126 @@
 package dotfile
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 
-	"github.com/solerf/dtm/common"
 	"github.com/solerf/dtm/profile"
 )
 
-var (
-	sysDirs = []string{".config", ".local/bin"}
-)
+const dirMode = os.FileMode(0755)
 
-type entry struct {
-	Key        string `json:"key"`
+type Item struct {
+	Profile *profile.Info `json:"profile"`
+	//the key serves as to map the real installation path at provided 'targetDir'
+	Key string `json:"key"`
+	// to where link points
 	SourcePath string `json:"source_path"`
-	TargetPath string `json:"target_path"`
+	// effective symlink
+	SymLink string `json:"symlink"`
 }
 
-func (e *entry) Install() error {
-	targetDir := path.Dir(e.TargetPath)
-	if !common.MustPathExists(targetDir) {
-		if err := os.MkdirAll(targetDir, common.DirMode); err != nil {
-			return fmt.Errorf("mkdir all [%v]: %w", targetDir, err)
-		}
+func (e *Item) install() (Status, error) {
+	lStat, errStat := os.Lstat(e.SymLink)
+
+	if errStat != nil && !errors.Is(errStat, os.ErrNotExist) {
+		return Failed, fmt.Errorf("reading link [%v]: %w", e.SymLink, errStat)
 	}
 
-	if common.MustPathExists(e.TargetPath) {
-		// check if points to same target that is trying to map
-		foundLinkTarget, err := os.Readlink(e.TargetPath)
+	if errStat == nil {
+		if !isSymlinkMode(lStat.Mode()) {
+			return Failed, fmt.Errorf("path already exists [%v] and is not a symlink", e.SymLink)
+		}
+
+		foundLinkTarget, err := os.Readlink(e.SymLink)
 		if err != nil {
-			return fmt.Errorf("reading link [%v]: %w", e.TargetPath, err)
+			return Failed, fmt.Errorf("reading link [%v]: %w", e.SymLink, err)
 		}
 
 		if foundLinkTarget == e.SourcePath {
-			return nil
+			return Skipped, nil
 		}
-
-		// if different it is removed to then be recreated
-		if err = os.Remove(e.TargetPath); err != nil {
-			return fmt.Errorf("remove existent [%v]: %w", e.TargetPath, err)
-		}
+		return Failed, fmt.Errorf("link already exists [%v] and points to another source [%s]", e.SymLink, foundLinkTarget)
 	}
 
-	if err := os.Symlink(e.SourcePath, e.TargetPath); err != nil {
-		return fmt.Errorf("linking [%v]: %w", e.TargetPath, err)
+	symlinkDir := filepath.Dir(e.SymLink)
+	if err := createIfMissing(symlinkDir); err != nil {
+		return Failed, err
+	}
+
+	//install
+	if err := os.Symlink(e.SourcePath, e.SymLink); err != nil {
+		return Failed, fmt.Errorf("linking [%v]: %w", e.SymLink, err)
+	}
+	return Ok, nil
+}
+
+func (e *Item) uninstall() (Status, error) {
+	// check if link still exists before removing
+	exist, err := e.linkExists()
+
+	if err != nil {
+		return Failed, fmt.Errorf("failed checking path [%v] to remove: %w", e.SymLink, err)
+	}
+
+	if !exist {
+		return Skipped, nil
+	}
+
+	if err := os.RemoveAll(e.SymLink); err != nil {
+		return Failed, fmt.Errorf("removing [%v]: %w", e.SymLink, err)
+	}
+	return Ok, nil
+}
+
+func (e *Item) linkExists() (bool, error) {
+	lStat, err := os.Lstat(e.SymLink)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return isSymlinkMode(lStat.Mode()), nil
+}
+
+func (e *Item) sourceExists() (bool, error) {
+	if _, err := os.Stat(e.SourcePath); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func createIfMissing(dir string) error {
+	if err := os.MkdirAll(dir, dirMode); err != nil {
+		return fmt.Errorf("mkdir all [%v]: %w", dir, err)
 	}
 	return nil
 }
 
-func (e *entry) Uninstall() error {
-	// it will follow the link, if missing returns false
-	if common.MustPathExists(e.TargetPath) {
-		if err := os.RemoveAll(e.TargetPath); err != nil {
-			return fmt.Errorf("removing [%v]: %w", e.TargetPath, err)
-		}
+func newEntry(targetDir string, prof *profile.Info, key, itemPath string) (Item, error) {
+	item := Item{
+		Profile:    prof,
+		Key:        key,
+		SourcePath: itemPath,
+		SymLink:    filepath.Join(targetDir, key),
 	}
-	return nil
+
+	exists, err := item.sourceExists()
+	if err != nil {
+		return Item{}, fmt.Errorf("new entry stat [%v]: %w", itemPath, err)
+	}
+
+	if !exists {
+		return Item{}, fmt.Errorf("new entry missing [%v]", itemPath)
+	}
+	return item, nil
 }
 
-func newEntry(targetDir string, sourceFullPath string) entry {
-	key := profile.RemoveProfile(sourceFullPath)
-	return entry{Key: key, SourcePath: sourceFullPath, TargetPath: path.Join(targetDir, key)}
-}
-
-func batch(targetDir string, sourceFullPath ...string) []entry {
-	es := make([]entry, 0, len(sourceFullPath))
-	for i := 0; i < len(sourceFullPath); i++ {
-		es = append(es, newEntry(targetDir, sourceFullPath[i]))
-	}
-	return es
+func isSymlinkMode(mode os.FileMode) bool {
+	return mode&os.ModeSymlink != 0
 }

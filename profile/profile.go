@@ -1,60 +1,51 @@
 package profile
 
 import (
+	"errors"
+	"fmt"
 	"log"
-	"path"
+	"os"
+	"path/filepath"
 	"slices"
-	"strings"
-
-	"github.com/solerf/dtm/common"
 )
 
-const (
-	prefix = "_"
-	shared = "shared"
-)
-
-type Profiles []Info
-
-func (p Profiles) Paths() []string {
-	paths := make([]string, 0, len(p))
-	for i := 0; i < len(p); i++ {
-		paths = append(paths, p[i].Path)
-	}
-	return paths
-}
+const shared = "shared"
 
 type Info struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 }
 
-func New(source string, name string) Info {
+func New(source string, name string) (Info, error) {
+	profilePath := filepath.Join(source, name)
+	if _, err := os.Stat(profilePath); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return Info{}, fmt.Errorf("failed checking profile exists [%v]: %w", profilePath, err)
+		}
+		return Info{}, fmt.Errorf("profile [%v] not found at [%v]", name, profilePath)
+	}
+
 	return Info{
 		Name: name,
-		Path: path.Join(source, prefix+name),
-	}
+		Path: profilePath,
+	}, nil
 }
 
-func Transform(source string, names []string) Profiles {
-	profiles := make([]Info, len(names)+1)
-	profiles[0] = New(source, shared)
+func Transform(source string, names []string) []Info {
+	pNames := make([]string, 0, len(names))
+	if slices.Index(names, shared) == -1 {
+		pNames = append(pNames, shared)
+	}
+	pNames = append(pNames, names...)
 
-	for i := 0; i < len(names); i++ {
-		p := New(source, names[i])
-		if exists := common.MustPathExists(p.Path); !exists {
-			log.Printf("[WARN] profile [%v] not found at [%v], ignored", p.Name, p.Path)
+	profiles := make([]Info, 0, len(pNames))
+	for _, p := range pNames {
+		prof, err := New(source, p)
+		if err != nil {
+			log.Printf("[WARN] %v, ignored: %v", p, err)
 			continue
 		}
-		profiles = append(profiles, p)
+		profiles = append(profiles, prof)
 	}
 	return profiles
-}
-
-func RemoveProfile(p string) string {
-	split := strings.Split(p, common.PathSeparator)
-	profileIndex := slices.IndexFunc(split, func(s string) bool {
-		return strings.HasPrefix(s, prefix)
-	})
-	return path.Join(split[profileIndex+1:]...)
 }

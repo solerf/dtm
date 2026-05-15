@@ -5,24 +5,21 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
-
-	"github.com/solerf/dtm/common"
-	"github.com/solerf/dtm/profile"
 )
 
-const mappingsFileName = ".dtm"
+const (
+	fileMode         = os.FileMode(0644)
+	mappingsFileName = ".dtm"
+)
 
 type Mapping struct {
-	InstallDir string         `json:"install_dir"`
-	Profiles   []profile.Info `json:"profiles"`
-	DotFiles   []entry        `json:"dotfiles"`
+	InstallDir string `json:"install_dir"`
+	DotFiles   []Item `json:"dotfiles"`
 }
 
-func newMapping(targetDir string, profiles profile.Profiles, dotfiles []entry) *Mapping {
+func newMapping(targetDir string, dotfiles []Item) *Mapping {
 	return &Mapping{
 		InstallDir: targetDir,
-		Profiles:   profiles,
 		DotFiles:   dotfiles,
 	}
 }
@@ -38,9 +35,7 @@ func readMapping(targetDir string) (*Mapping, error) {
 	if err = json.Unmarshal(file, &m); err != nil {
 		return nil, fmt.Errorf("deserializing mappings: %w", err)
 	}
-
-	m.DotFiles = slices.Clip(m.DotFiles)
-	return &m, err
+	return &m, nil
 }
 
 func (m *Mapping) write() error {
@@ -49,16 +44,24 @@ func (m *Mapping) write() error {
 		return fmt.Errorf("generating mappings: %w", err)
 	}
 
-	if err = os.WriteFile(filepath.Join(m.InstallDir, mappingsFileName), bMappings, common.FileMode); err != nil {
+	finalFile := filepath.Join(m.InstallDir, mappingsFileName)
+	tmpFile := finalFile + ".tmp"
+
+	if err = os.WriteFile(tmpFile, bMappings, fileMode); err != nil {
 		return fmt.Errorf("serializing mappings: %w", err)
 	}
+
+	if err = os.Rename(tmpFile, finalFile); err != nil {
+		return fmt.Errorf("writing mappings: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
 	return nil
 }
 
 func (m *Mapping) Delete() error {
-	if err := os.RemoveAll(filepath.Join(m.InstallDir, mappingsFileName)); err != nil {
+	if err := os.Remove(filepath.Join(m.InstallDir, mappingsFileName)); err != nil {
 		return fmt.Errorf("delete mappings: %w", err)
 	}
-
 	return nil
 }

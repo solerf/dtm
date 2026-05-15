@@ -5,75 +5,89 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 
-	"github.com/solerf/dtm/common"
+	"github.com/solerf/dtm/ignore"
 	"github.com/solerf/dtm/profile"
 )
 
-func Install(sourceDir, targetDir string, profileNames ...string) error {
-	if exists := common.MustPathExists(sourceDir); !exists {
-		return fmt.Errorf("install: missing %v", sourceDir)
+func Install(sourceDir, targetDir string, profileNames ...string) ([]OperationStatus, error) {
+	log.Printf("installing, %s", strings.Join(profileNames, ", "))
+	if sourceDir == targetDir {
+		return nil, errors.New("source and target directory cannot be the same")
 	}
 
-	if exists := common.MustPathExists(targetDir); !exists {
-		if errMkdir := os.MkdirAll(targetDir, common.DirMode); errMkdir != nil {
-			return fmt.Errorf("install: mkdir: %w", errMkdir)
+	if _, err := os.Stat(sourceDir); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("install: %v: %w", sourceDir, err)
 		}
+		return nil, fmt.Errorf("install: missing %v", sourceDir)
+	}
+
+	if err := createIfMissing(targetDir); err != nil {
+		return nil, fmt.Errorf("install: %w", err)
 	}
 
 	profiles := profile.Transform(sourceDir, profileNames)
 
-	ignoreFilter, err := IgnoreFilter(sourceDir)
+	ignoreFilter, err := ignore.FilterFunc(sourceDir)
 	if err != nil {
-		return fmt.Errorf("install: %w", err)
+		return nil, fmt.Errorf("install: %w", err)
 	}
 
-	filePaths, err := Collect(ignoreFilter, profiles...)
+	log.Println("collecting files...")
+	dotfiles, err := collectItemPaths(targetDir, ignoreFilter, profiles...)
 	if err != nil {
-		return fmt.Errorf("install: %w", err)
+		return nil, fmt.Errorf("install: %w", err)
 	}
 
 	removeStaleEntries(targetDir)
 
-	dotfiles := batch(targetDir, filePaths...)
-	msgTempl := "installed [%v] to [%v]: %v"
-	for i := 0; i < len(dotfiles); i++ {
-		e := dotfiles[i]
-		if err = e.Install(); err != nil {
-			log.Printf("[ERROR] "+msgTempl, e.Key, e.TargetPath, err)
-			continue
+	result := make([]OperationStatus, 0, len(dotfiles))
+	dtFilesToMapping := make([]Item, 0, len(dotfiles))
+	for _, e := range dotfiles {
+		var st Status
+		st, err = e.install()
+		result = append(result, OperationStatus{Dotfile: &e, Status: st, Error: err})
+		if err == nil {
+			// discard failed installations
+			dtFilesToMapping = append(dtFilesToMapping, e)
 		}
-		log.Printf(msgTempl, e.Key, e.TargetPath, "OK")
 	}
 
-	if err = newMapping(targetDir, profiles, dotfiles).write(); err != nil {
-		return fmt.Errorf("install: %w", err)
+	if err = newMapping(targetDir, dtFilesToMapping).write(); err != nil {
+		return nil, fmt.Errorf("install: %w", err)
 	}
-	return nil
+	return result, nil
 }
 
 func removeStaleEntries(targetDir string) {
-	if common.MustPathExists(targetDir) {
-		mapping, err := readMapping(targetDir)
-		if err != nil {
-			if !errors.Is(err, os.ErrNotExist) {
-				log.Printf("[ERROR] trying to remove stale entries: %v", err)
-			}
+	// if before installing a previous link, which is not pointing to anything is found
+	// it is removed as its target probably has been previously removed
+	mapping, err := readMapping(targetDir)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			log.Printf("[ERROR] trying to read stale entries: %v", err)
 			return
 		}
+		log.Printf("[WARN] mapping not found, not checking stale entries: %v", err)
+		return
+	}
 
-		for i := 0; i < len(mapping.DotFiles); i++ {
-			dt := mapping.DotFiles[i]
+	for _, dt := range mapping.DotFiles {
+		linkExists, err := dt.linkExists()
+		if err != nil {
+			log.Printf("[WARN] stale entries, skipping [%s]: %v", dt.Key, err)
+			continue
+		}
 
-			// it will follow the symlink, if missing returns false
-			// means that the linked file does not exist anymore
-			// so is safe to remove the link
-			if !common.MustPathExists(dt.TargetPath) {
-				if err = os.Remove(dt.TargetPath); err != nil {
-					log.Printf("[ERROR] trying to remove stale link [%v]: %v", dt.TargetPath, err)
+		if linkExists {
+			if sourceExist, err := dt.sourceExists(); !sourceExist && err == nil {
+				if err = os.Remove(dt.SymLink); err != nil {
+					log.Printf("[ERROR] trying to remove stale link [%v]: %v", dt.SymLink, err)
 					continue
 				}
-				log.Printf("removed stale link [%v]", dt.TargetPath)
+				log.Printf("removed stale link [%v]", dt.SymLink)
 			}
 		}
 	}
